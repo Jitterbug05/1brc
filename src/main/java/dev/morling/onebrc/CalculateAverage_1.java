@@ -15,23 +15,28 @@
  */
 package dev.morling.onebrc;
 
+import static java.lang.Double.parseDouble;
 import static java.util.stream.Collectors.*;
 
+import java.io.BufferedReader;
+import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.DoubleSummaryStatistics;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collector;
+import java.util.stream.Collectors;
 
-public class CalculateAverage_baseline {
+public class CalculateAverage_1 {
 
     private static final String FILE = "./measurements.txt";
 
     private static record Measurement(String station, double value) {
         private Measurement(String[] parts) {
-            this(parts[0], Double.parseDouble(parts[1]));
+            this(parts[0], parseDouble(parts[1]));
         }
     }
 
@@ -53,45 +58,29 @@ public class CalculateAverage_baseline {
         private long count;
     }
 
-    // Runtime: 4 min, 10 sec
+    // Runtime: 2 min, 1 sec
     public static void main(String[] args) throws IOException {
-        // Map<String, Double> measurements1 = Files.lines(Paths.get(FILE))
-        // .map(l -> l.split(";"))
-        // .collect(groupingBy(m -> m[0], averagingDouble(m -> Double.parseDouble(m[1]))));
-        //
-        // measurements1 = new TreeMap<>(measurements1.entrySet()
-        // .stream()
-        // .collect(toMap(e -> e.getKey(), e -> Math.round(e.getValue() * 10.0) / 10.0)));
-        // System.out.println(measurements1);
-
         long start = System.currentTimeMillis();
 
-        Collector<Measurement, MeasurementAggregator, ResultRow> collector = Collector.of(
-                MeasurementAggregator::new,
-                (a, m) -> {
-                    a.min = Math.min(a.min, m.value);
-                    a.max = Math.max(a.max, m.value);
-                    a.sum += m.value;
-                    a.count++;
+        Map<String, DoubleSummaryStatistics> allStats = new BufferedReader(new FileReader("measurements.txt"))
+                .lines()
+                .parallel()
+                .collect(
+                        groupingBy(line -> line.substring(0, line.indexOf(';')),
+                                summarizingDouble(line ->
+                                        parseDouble(line.substring(line.indexOf(';') + 1)))));
+        Map<String, String> result = allStats.entrySet().stream().collect(Collectors.toMap(
+                Map.Entry::getKey,
+                e -> {
+                    var stats = e.getValue();
+                    return String.format("%.1f/%.1f/%.1f",
+                            stats.getMin(), stats.getAverage(), stats.getMax());
                 },
-                (agg1, agg2) -> {
-                    var res = new MeasurementAggregator();
-                    res.min = Math.min(agg1.min, agg2.min);
-                    res.max = Math.max(agg1.max, agg2.max);
-                    res.sum = agg1.sum + agg2.sum;
-                    res.count = agg1.count + agg2.count;
+                (l, r) -> r,
+                TreeMap::new));
 
-                    return res;
-                },
-                agg -> {
-                    return new ResultRow(agg.min, (Math.round(agg.sum * 10.0) / 10.0) / agg.count, agg.max);
-                });
+        System.out.println(result);
 
-        Map<String, ResultRow> measurements = new TreeMap<>(Files.lines(Paths.get(FILE))
-                .map(l -> new Measurement(l.split(";")))
-                .collect(groupingBy(m -> m.station(), collector)));
-
-        System.out.println(measurements);
         long end = System.currentTimeMillis();
 
         String time = String.format("%d min, %d sec",
